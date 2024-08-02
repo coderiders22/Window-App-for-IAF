@@ -14,7 +14,8 @@ dependencies:
   file_picker: ^4.5.0
   fluttertoast: ^8.0.8
   pdf: ^3.6.5
-  charts_flutter: ^0.11.0  # Alternative charting library
+  charts_flutter: ^0.11.0
+
 
 
 
@@ -27,3 +28,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/animations/ml.gif

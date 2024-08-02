@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'dart:typed_data';
-import 'dart:html' as html;
+import 'package:flutter/scheduler.dart';
+// Conditional imports
+import 'non_web_util.dart' if (dart.library.html) 'web_util.dart';
 
 void main() {
   runApp(MyApp());
@@ -13,6 +16,11 @@ void main() {
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    // Locking device orientation to portrait mode
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+
     return MaterialApp(
       title: 'CSV Upload Model',
       theme: ThemeData(
@@ -103,13 +111,8 @@ class _MyHomePageState extends State<MyHomePage> {
     // Extract file name without extension
     final pdfFileName = _csvFileName!.replaceAll(RegExp(r'\.csv$'), '_report.pdf');
 
-    // Trigger download
-    final blob = html.Blob([pdfBytes]);
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute('download', pdfFileName)
-      ..click();
-    html.Url.revokeObjectUrl(url);
+    // Use conditional method to download the file based on platform
+    downloadPdf(pdfBytes, pdfFileName);
   }
 
   @override
@@ -158,72 +161,82 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
         ],
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              ElevatedButton(
-                onPressed: _pickFile,
-                style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                  backgroundColor: Colors.deepOrange,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  elevation: 10,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.upload_file, size: 24),
-                    SizedBox(width: 10),
-                    Text(
-                      "Upload CSV File",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-              if (_isUploading)
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: CircularProgressIndicator(
-                    color: Colors.deepOrange,
-                  ),
-                ),
-              if (_fileUploaded)
-                Column(
-                  children: [
-                    SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _generatePdf,
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                        backgroundColor: Colors.teal,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        elevation: 10,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.picture_as_pdf, size: 24),
-                          SizedBox(width: 10),
-                          Text(
-                            "Download Report (PDF)",
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-            ],
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset(
+              'assets/animations/ml.gif', // Make sure to put the gif file in the assets folder and declare it in pubspec.yaml
+              fit: BoxFit.cover,
+            ),
           ),
-        ),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  ElevatedButton(
+                    onPressed: _pickFile,
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                      backgroundColor: Colors.deepOrange,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      elevation: 10,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.upload_file, size: 24, color: Colors.white),
+                        SizedBox(width: 10),
+                        Text(
+                          "Upload CSV File",
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_isUploading)
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: CircularProgressIndicator(
+                        color: Colors.deepOrange,
+                      ),
+                    ),
+                  if (_fileUploaded)
+                    Column(
+                      children: [
+                        SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: _generatePdf,
+                          style: ElevatedButton.styleFrom(
+                            padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                            backgroundColor: Colors.teal,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            elevation: 10,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.picture_as_pdf, size: 24, color: Colors.white),
+                              SizedBox(width: 10),
+                              Text(
+                                "Download Report (PDF)",
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
