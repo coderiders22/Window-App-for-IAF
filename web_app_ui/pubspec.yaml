@@ -15,6 +15,21 @@ dependencies:
   fluttertoast: ^8.0.8
   pdf: ^3.6.5
   charts_flutter: ^0.11.0
+  path_provider: ^2.0.11
+  flutter_pdfview: ^1.3.3
+  syncfusion_flutter_pdfviewer: ^20.3.53
+  video_player: ^2.5.0
+  excel: ^2.0.4
+  permission_handler: ^10.2.0
+  open_file: ^3.2.1
+  shared_preferences: ^2.0.8
+  fl_chart: ^0.55.0
+
+
+
+
+
+
 
 
 
@@ -25,9 +40,17 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  csv: ^5.0.0
 
 flutter:
   uses-material-design: true
 
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+
   assets:
     - assets/animations/ml.gif
+    - assets/images/iaf.jpg
+
