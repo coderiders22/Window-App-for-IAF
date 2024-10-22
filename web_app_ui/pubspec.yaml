@@ -26,16 +26,6 @@ dependencies:
   fl_chart: ^0.55.0
 
 
-
-
-
-
-
-
-
-
-
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -53,4 +43,5 @@ flutter:
   assets:
     - assets/animations/ml.gif
     - assets/images/iaf.jpg
+    - assets/
 

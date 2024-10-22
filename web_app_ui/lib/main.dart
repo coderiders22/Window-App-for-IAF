@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -8,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_app_ui/model.dart';
 import 'non_web_util.dart' if (dart.library.html) 'web_util.dart';
 
 void main() {
@@ -23,8 +25,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         visualDensity: VisualDensity.adaptivePlatformDensity,
         fontFamily: 'Roboto',
-        colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.deepOrange)
-            .copyWith(secondary: Colors.green, brightness: Brightness.light),
+        colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.deepOrange),
         scaffoldBackgroundColor: Colors.white,
         textTheme: TextTheme(bodyLarge: TextStyle(color: Colors.black)),
       ),
@@ -38,13 +39,15 @@ class MyHomePage extends StatefulWidget {
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateMixin {
+class _MyHomePageState extends State<MyHomePage>
+    with SingleTickerProviderStateMixin {
   bool _fileUploaded = false;
   String? _excelFileName;
   List<List<dynamic>> _excelData = [];
-  List<Map<String, dynamic>> _aircraftData = [];
+  List<List<dynamic>> _aircraftData = [];
   List<String> _downloadHistory = [];
   List<String> _uploadHistory = [];
+  late Map<String, dynamic> _finalOutput;
   bool _showResults = false;
   late AnimationController _animationController;
   late Animation<double> _animation;
@@ -52,12 +55,11 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    // _loadHistory();
     _animationController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
-    )
-      ..repeat(reverse: true);
+    )..repeat(reverse: true);
     _animation =
         CurvedAnimation(parent: _animationController, curve: Curves.easeInOut);
   }
@@ -68,25 +70,26 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  Future<void> _loadHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _downloadHistory = prefs.getStringList('downloadHistory') ?? [];
-      _uploadHistory = prefs.getStringList('uploadHistory') ?? [];
-    });
-  }
+  // Future<void> _loadHistory() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   setState(() {
+  //     _downloadHistory = prefs.getStringList('downloadHistory') ?? [];
+  //     _uploadHistory = prefs.getStringList('uploadHistory') ?? [];
+  //   });
+  // }
 
-  Future<void> _saveHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('downloadHistory', _downloadHistory);
-    await prefs.setStringList('uploadHistory', _uploadHistory);
-  }
+  // Future<void> _saveHistory() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   await prefs.setStringList('downloadHistory', _downloadHistory);
+  //   await prefs.setStringList('uploadHistory', _uploadHistory);
+  // }
 
   Future<void> _pickFile() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls'],
     );
+    late Map<String, dynamic> predictions;
 
     if (result != null) {
       setState(() {
@@ -100,12 +103,95 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
         final sheet = excel.tables[excel.tables.keys.first]!;
 
         _excelData = sheet.rows;
-        _aircraftData = sheet.rows.skip(1).map((row) {
-          return {
-            'Aircraft Name': row[0]?.value?.toString() ?? '',
-            'Status': row[1]?.value?.toString() ?? '',
-          };
-        }).toList();
+        _aircraftData = sheet.rows
+            .skip(2)
+            .map((row) {
+              // Map each row to its values.
+              List<dynamic> values =
+                  row.map((r) => r?.value?.toString().trim() ?? '').toList() ??
+                      [];
+
+              // Remove empty strings or rows that are only whitespace.
+              values.removeWhere((value) => value.isEmpty);
+
+              // Return the values if they are not empty.
+              return values.isEmpty ? null : values;
+            })
+            .whereType<List<dynamic>>()
+            .toList();
+
+        List<String> stringsToCheck = [
+          '(2)ny',
+          '(3)kr',
+          '(4)tg',
+          '(6)hg',
+          '(7)ku',
+          '(8)xh',
+          '(9)sh',
+          '(11)dk',
+          '(12)db',
+          '(13)nl',
+          '(14)pb',
+          '(16)nz',
+          '(17)tgd2',
+          '(21)xk',
+          '(22)xosh',
+          '(23)tgd1',
+          '(24)xb',
+          '(29)np',
+          '(31)v',
+          '(32)h',
+          '(45)nb',
+          '(63)u'
+        ];
+
+        bool allStringsPresent = false;
+
+        if (_aircraftData.isNotEmpty) {
+          List<dynamic> firstArray = _aircraftData[0];
+
+          // Check if each string in 'stringsToCheck' exists in 'firstArray'.
+          allStringsPresent =
+              stringsToCheck.every((string) => firstArray.contains(string));
+        }
+
+        if (allStringsPresent) {
+          List<int> selectedIndices = [];
+          if (_aircraftData.isNotEmpty) {
+            List<dynamic> headerRow = _aircraftData[0];
+            selectedIndices =
+                stringsToCheck.map((col) => headerRow.indexOf(col)).toList();
+          }
+
+          List<List<dynamic>> filteredData = _aircraftData.map((row) {
+            return selectedIndices.map((index) => row[index]).toList();
+          }).toList();
+
+          int removedCount = 0;
+          List<List<dynamic>> validData = [];
+
+          for (var row in filteredData) {
+            bool isValidRow = true;
+            for (var value in row) {
+              if (value == null ||
+                  value.toString().trim().isEmpty ||
+                  value.toString() == 'NaN') {
+                isValidRow = false;
+                removedCount++;
+                break;
+              }
+            }
+            if (isValidRow) {
+              validData.add(row);
+            }
+          }
+
+          predictions = await runRandomForestModel(validData);
+          predictions["removedRows"] = removedCount;
+          predictions["totalRows"] = validData.length - 1;
+        } else {
+          throw ArgumentError("Wrong CSV Uploaded");
+        }
 
         Fluttertoast.showToast(
           msg: "File uploaded successfully",
@@ -115,22 +201,29 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
 
         setState(() {
           _fileUploaded = true;
-          _uploadHistory.add(
-              '${DateTime.now().toIso8601String()}: $_excelFileName');
+          _uploadHistory
+              .add('${DateTime.now().toIso8601String()}: $_excelFileName');
+          _finalOutput = predictions;
         });
-        _saveHistory();
+        print(_finalOutput);
+        print(_fileUploaded);
+
+        // _saveHistory();
       } catch (e) {
         Fluttertoast.showToast(
-          msg: "Error processing file: ${e.toString()}",
-          backgroundColor: Colors.red,
-          textColor: Colors.white,
-        );
+            msg: "Error processing file: ${e.toString()}",
+            toastLength: Toast.LENGTH_SHORT,
+            gravity: ToastGravity.BOTTOM,
+            timeInSecForIosWeb: 1,
+            backgroundColor: Colors.red,
+            textColor: Colors.white,
+            fontSize: 16.0);
       }
     }
   }
 
   Future<void> _generateResults() async {
-    if (_aircraftData.isEmpty) return;
+    if (_finalOutput.isEmpty) return;
 
     setState(() {
       _showResults = true;
@@ -139,17 +232,19 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     final pdfFile = await _generateStyledPDF();
     if (pdfFile != null) {
       setState(() {
-        _downloadHistory.add(
-            '${DateTime.now().toIso8601String()}: ${pdfFile.path}');
+        _downloadHistory
+            .add('${DateTime.now().toIso8601String()}: ${pdfFile.path}');
       });
-      _saveHistory();
+      // _saveHistory();
+
       _showPDFSavedNotification(pdfFile.path);
     }
   }
 
   void _showPDFSavedNotification(String filePath) {
+    String message = kIsWeb?"PDF Downloaded":"PDF saved: $filePath";
     Fluttertoast.showToast(
-      msg: "PDF saved: $filePath",
+      msg: message,
       toastLength: Toast.LENGTH_LONG,
       gravity: ToastGravity.BOTTOM,
       backgroundColor: Colors.green,
@@ -175,27 +270,60 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                         font: ttf, fontSize: 24, color: PdfColors.deepOrange)),
               ),
               pw.SizedBox(height: 20),
-              pw.Table.fromTextArray(
+              pw.TableHelper.fromTextArray(
                 context: context,
+                headers: ['Phase', 'Healthy', 'Total Size'],
                 data: [
-                  ['Aircraft Name', 'Status'],
-                  ..._aircraftData.map((aircraft) =>
                   [
-                    aircraft['Aircraft Name'],
-                    aircraft['Status']
-                  ]),
+                    'Cruise',
+                    _finalOutput['cruise']['healthy'],
+                    _finalOutput['cruise']['totalSize']
+                  ],
+                  [
+                    'Idle',
+                    _finalOutput['idle']['healthy'],
+                    _finalOutput['idle']['totalSize']
+                  ],
+                  [
+                    'Takeoff',
+                    _finalOutput['takeoff']['healthy'],
+                    _finalOutput['takeoff']['totalSize']
+                  ],
                 ],
                 headerStyle: pw.TextStyle(
                     fontWeight: pw.FontWeight.bold, color: PdfColors.white),
                 headerDecoration: pw.BoxDecoration(color: PdfColors.deepOrange),
                 rowDecoration: pw.BoxDecoration(
                     border: pw.Border(
-                        bottom: pw.BorderSide(color: PdfColors.grey300))
-                ),
+                        bottom: pw.BorderSide(color: PdfColors.grey300))),
                 cellAlignments: {
                   0: pw.Alignment.centerLeft,
-                  1: pw.Alignment.center
+                  1: pw.Alignment.center,
+                  2: pw.Alignment.center,
                 },
+              ),
+              pw.SizedBox(height: 20),
+              pw.Text(
+                'Total Rows: ${_finalOutput['totalRows']}',
+                style: pw.TextStyle(font: ttf, fontSize: 12),
+              ),
+              pw.Text(
+                'Removed Rows: ${_finalOutput['removedRows']}',
+                style: pw.TextStyle(font: ttf, fontSize: 12),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'Average Healthy Percentage: ${_finalOutput['averagePercentage']}%',
+                style: pw.TextStyle(font: ttf, fontSize: 12),
+              ),
+              pw.Text(
+                'Overall Status: ${_finalOutput['overallStatus']}',
+                style: pw.TextStyle(
+                    font: ttf,
+                    fontSize: 12,
+                    color: _finalOutput['overallStatus'] == 'Healthy'
+                        ? PdfColors.green
+                        : PdfColors.red),
               ),
             ],
           );
@@ -203,15 +331,19 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       ),
     );
 
+    // Save the PDF file to a location
     try {
-      final output = await getApplicationDocumentsDirectory();
-      final file = File("${output.path}/iaf_aircraft_health_${DateTime
-          .now()
-          .millisecondsSinceEpoch}.pdf");
-      await file.writeAsBytes(await pdf.save());
-      return file;
+      if (kIsWeb) {
+        // Save the PDF to bytes
+        final pdfBytes = await pdf.save();
+        downloadPdf(pdfBytes, "aircraft_health_report.pdf");
+        return null;
+      }
+      final output = await getTemporaryDirectory();
+      final file = File('${output.path}/aircraft_health_report.pdf');
+      return file.writeAsBytes(await pdf.save());
     } catch (e) {
-      print('Error saving PDF: $e');
+      print("Error PDF ${e}");
       return null;
     }
   }
@@ -220,59 +352,182 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
+        scrollDirection: Axis.vertical,
         child: DataTable(
-          columns: _excelData.first.map((header) => DataColumn(label: Text(
-              header.toString(),
-              style: TextStyle(fontWeight: FontWeight.bold)))).toList(),
-          rows: _excelData.skip(1).map((row) {
-            return DataRow(
-              cells: row.map((cell) => DataCell(Text(cell?.toString() ?? '')))
-                  .toList(),
-            );
-          }).toList(),
+          columns: _aircraftData.first
+              .map((header) => DataColumn(
+                  label: Text(header.toString(),
+                      style: TextStyle(fontWeight: FontWeight.bold))))
+              .toList(),
+          rows: List<DataRow>.generate(
+            (_aircraftData.length - 1).clamp(0,50), // Skip header
+            (index) {
+              var row = _aircraftData[index + 1]; // Adjust index
+              return DataRow(
+                cells: row
+                    .map((cell) => DataCell(Text(cell?.toString() ?? '')))
+                    .toList(),
+              );
+            },
+          ),
         ),
       ),
     );
   }
+  // Helper to build a row in the table
+  TableRow _buildTableRow(String phase, double healthy, double total) {
+    return TableRow(children: [
+      Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Text(phase, style: TextStyle(color: Colors.black)),
+      ),
+      Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Text(healthy.toString(), style: TextStyle(color: Colors.black)),
+      ),
+      Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Text(total.toString(), style: TextStyle(color: Colors.black)),
+      ),
+    ]);
+  }
 
-  Widget _buildResults() {
-    return SingleChildScrollView(
-      child: Column(
+  // Helper to build a row displaying status
+  Widget _buildStatusRow(String label, double value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Row(
         children: [
           Text(
-            "Aircraft Health Status:",
-            style: TextStyle(fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.deepOrange),
+            "$label ",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
-          SizedBox(height: 20),
-          ..._aircraftData.map((aircraft) {
-            bool isHealthy = aircraft['Status'].toLowerCase() == 'healthy';
-            return Card(
-              elevation: 5,
-              margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              child: ListTile(
-                leading: Icon(
-                  isHealthy ? Icons.check_circle : Icons.warning,
-                  color: isHealthy ? Colors.green : Colors.red,
-                  size: 40,
-                ),
-                title: Text(aircraft['Aircraft Name'],
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(
-                  isHealthy ? 'Healthy' : 'Unhealthy',
-                  style: TextStyle(
-                    color: isHealthy ? Colors.green : Colors.red,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                trailing: Icon(Icons.airplanemode_active, color: Colors.blue),
-              ),
-            );
-          }).toList(),
+          Text(
+            value.toString(),
+            style: TextStyle(fontSize: 16),
+          ),
         ],
       ),
     );
+  }
+
+
+  Widget _buildResults() {
+   return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              "Aircraft Health Status:",
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepOrange),
+            ),
+          ),
+
+          SizedBox(height: 20),
+
+          // Table for Cruise, Idle, and Takeoff
+          Card(
+            margin: EdgeInsets.symmetric(horizontal: 16),
+            elevation: 5,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Table(
+                columnWidths: {
+                  0: FlexColumnWidth(1),
+                  1: FlexColumnWidth(1),
+                  2: FlexColumnWidth(1),
+                },
+                border: TableBorder.all(color: Colors.black),
+                children: [
+                  // Table Header
+                  TableRow(children: [
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Text(
+                        "Phase",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.black),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Text(
+                        "Healthy",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.black),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Text(
+                        "Total",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.black),
+                      ),
+                    ),
+                  ]),
+
+                  // Cruise Data
+                  _buildTableRow("Cruise", _finalOutput['cruise']['healthy'],
+                      _finalOutput['cruise']['totalSize']),
+
+                  // Idle Data
+                  _buildTableRow("Idle", _finalOutput['idle']['healthy'],
+                      _finalOutput['idle']['totalSize']),
+
+                  // Takeoff Data
+                  _buildTableRow("Takeoff", _finalOutput['takeoff']['healthy'],
+                      _finalOutput['takeoff']['totalSize']),
+                ],
+              ),
+            ),
+          ),
+
+          SizedBox(height: 20),
+
+          // Total Rows, Removed Rows, and Overall Status
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Total Rows
+                _buildStatusRow("Total Rows:", _finalOutput['totalRows']),
+
+                // Removed Rows
+                _buildStatusRow("Removed Rows:", _finalOutput['removedRows']),
+
+                // Overall Status
+                Row(
+                  children: [
+                    Text(
+                      "Overall Status: ",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    Text(
+                      _finalOutput['overallStatus'],
+                      style: TextStyle(
+                        color: _finalOutput['overallStatus'] == 'Healthy'
+                            ? Colors.green
+                            : Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    
   }
 
   void _showUploadHistory() {
@@ -354,9 +609,12 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                   padding: EdgeInsets.all(8.0),
                   color: Colors.white.withOpacity(0.8),
                   // Slight transparency for better visibility
-                  child: _fileUploaded ? _buildExcelPreview() : Center(
-                      child: Text("Upload an Excel file",
-                          style: TextStyle(fontSize: 16, color: Colors.grey))),
+                  child: _fileUploaded
+                      ? _buildExcelPreview()
+                      : Center(
+                          child: Text("Upload an Excel file",
+                              style:
+                                  TextStyle(fontSize: 16, color: Colors.grey))),
                 ),
               ),
               VerticalDivider(width: 1, color: Colors.black12),
@@ -366,9 +624,12 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                   padding: EdgeInsets.all(8.0),
                   color: Colors.white.withOpacity(0.8),
                   // Slight transparency for better visibility
-                  child: _showResults ? _buildResults() : Center(child: Text(
-                      "Results will appear here",
-                      style: TextStyle(fontSize: 16, color: Colors.grey))),
+                  child: _showResults
+                      ? _buildResults()
+                      : Center(
+                          child: Text("Results will appear here",
+                              style:
+                                  TextStyle(fontSize: 16, color: Colors.grey))),
                 ),
               ),
             ],
