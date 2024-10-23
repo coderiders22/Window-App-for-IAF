@@ -12,7 +12,6 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
   file_picker: ^4.5.0
-  fluttertoast: ^8.0.8
   pdf: ^3.6.5
   charts_flutter: ^0.11.0
   path_provider: ^2.0.11

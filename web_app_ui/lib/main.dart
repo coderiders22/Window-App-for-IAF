@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:excel/excel.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -16,11 +16,21 @@ void main() {
   runApp(MyApp());
 }
 
+class MyCustomScrollBehavior extends MaterialScrollBehavior {
+  // Override behavior methods like buildOverscrollIndicator and buildScrollbar
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+      };
+}
+
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     return MaterialApp(
+      scrollBehavior: MyCustomScrollBehavior(),
       title: 'IAF Aircraft Health Predictor',
       theme: ThemeData(
         visualDensity: VisualDensity.adaptivePlatformDensity,
@@ -42,6 +52,8 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage>
     with SingleTickerProviderStateMixin {
   bool _fileUploaded = false;
+  bool _loading = false;
+  bool _toggle = false;
   String? _excelFileName;
   List<List<dynamic>> _excelData = [];
   List<List<dynamic>> _aircraftData = [];
@@ -86,9 +98,14 @@ class _MyHomePageState extends State<MyHomePage>
 
   Future<void> _pickFile() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
+      withData: true,
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls'],
     );
+    setState(() {
+      _loading = true;
+    });
+
     late Map<String, dynamic> predictions;
 
     if (result != null) {
@@ -163,11 +180,18 @@ class _MyHomePageState extends State<MyHomePage>
                 stringsToCheck.map((col) => headerRow.indexOf(col)).toList();
           }
 
-          List<List<dynamic>> filteredData = _aircraftData.map((row) {
+          int removedCount = 0;
+          List<List<dynamic>> filteredData = _aircraftData.where((row) {
+            // Check if all selected indices are valid for the current row
+            if (!selectedIndices.every((index) => index < row.length)) {
+              removedCount++; // Increment count for removed row
+              return false; // Exclude this row
+            }
+            return true; // Include this row
+          }).map((row) {
+            // Map the valid rows to the selected indices
             return selectedIndices.map((index) => row[index]).toList();
           }).toList();
-
-          int removedCount = 0;
           List<List<dynamic>> validData = [];
 
           for (var row in filteredData) {
@@ -192,15 +216,12 @@ class _MyHomePageState extends State<MyHomePage>
         } else {
           throw ArgumentError("Wrong CSV Uploaded");
         }
-
-        Fluttertoast.showToast(
-          msg: "File uploaded successfully",
-          backgroundColor: Colors.green,
-          textColor: Colors.white,
-        );
+        // Working in chroma and not windows need to work on that
 
         setState(() {
           _fileUploaded = true;
+          _loading = false;
+          _toggle = true;
           _uploadHistory
               .add('${DateTime.now().toIso8601String()}: $_excelFileName');
           _finalOutput = predictions;
@@ -210,14 +231,7 @@ class _MyHomePageState extends State<MyHomePage>
 
         // _saveHistory();
       } catch (e) {
-        Fluttertoast.showToast(
-            msg: "Error processing file: ${e.toString()}",
-            toastLength: Toast.LENGTH_SHORT,
-            gravity: ToastGravity.BOTTOM,
-            timeInSecForIosWeb: 1,
-            backgroundColor: Colors.red,
-            textColor: Colors.white,
-            fontSize: 16.0);
+        print("Error $e");
       }
     }
   }
@@ -227,6 +241,7 @@ class _MyHomePageState extends State<MyHomePage>
 
     setState(() {
       _showResults = true;
+      _loading = true;
     });
 
     final pdfFile = await _generateStyledPDF();
@@ -239,17 +254,14 @@ class _MyHomePageState extends State<MyHomePage>
 
       _showPDFSavedNotification(pdfFile.path);
     }
+    setState(() {
+      _loading = false;
+      _toggle = false;
+    });
   }
 
   void _showPDFSavedNotification(String filePath) {
-    String message = kIsWeb?"PDF Downloaded":"PDF saved: $filePath";
-    Fluttertoast.showToast(
-      msg: message,
-      toastLength: Toast.LENGTH_LONG,
-      gravity: ToastGravity.BOTTOM,
-      backgroundColor: Colors.green,
-      textColor: Colors.white,
-    );
+    String message = kIsWeb ? "PDF Downloaded" : "PDF saved: $filePath";
   }
 
   Future<File?> _generateStyledPDF() async {
@@ -272,7 +284,7 @@ class _MyHomePageState extends State<MyHomePage>
               pw.SizedBox(height: 20),
               pw.TableHelper.fromTextArray(
                 context: context,
-                headers: ['Phase', 'Healthy', 'Total Size'],
+                headers: ['Mode', 'Healthy', 'Total Size'],
                 data: [
                   [
                     'Cruise',
@@ -360,7 +372,7 @@ class _MyHomePageState extends State<MyHomePage>
                       style: TextStyle(fontWeight: FontWeight.bold))))
               .toList(),
           rows: List<DataRow>.generate(
-            (_aircraftData.length - 1).clamp(0,50), // Skip header
+            (_aircraftData.length - 1).clamp(0, 50), // Skip header
             (index) {
               var row = _aircraftData[index + 1]; // Adjust index
               return DataRow(
@@ -374,6 +386,7 @@ class _MyHomePageState extends State<MyHomePage>
       ),
     );
   }
+
   // Helper to build a row in the table
   TableRow _buildTableRow(String phase, double healthy, double total) {
     return TableRow(children: [
@@ -411,123 +424,120 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-
   Widget _buildResults() {
-   return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Title
-          Padding(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Title
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            "Aircraft Health Status:",
+            style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.deepOrange),
+          ),
+        ),
+
+        SizedBox(height: 20),
+
+        // Table for Cruise, Idle, and Takeoff
+        Card(
+          margin: EdgeInsets.symmetric(horizontal: 16),
+          elevation: 5,
+          child: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(
-              "Aircraft Health Status:",
-              style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepOrange),
-            ),
-          ),
-
-          SizedBox(height: 20),
-
-          // Table for Cruise, Idle, and Takeoff
-          Card(
-            margin: EdgeInsets.symmetric(horizontal: 16),
-            elevation: 5,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Table(
-                columnWidths: {
-                  0: FlexColumnWidth(1),
-                  1: FlexColumnWidth(1),
-                  2: FlexColumnWidth(1),
-                },
-                border: TableBorder.all(color: Colors.black),
-                children: [
-                  // Table Header
-                  TableRow(children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        "Phase",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.black),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        "Healthy",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.black),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        "Total",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, color: Colors.black),
-                      ),
-                    ),
-                  ]),
-
-                  // Cruise Data
-                  _buildTableRow("Cruise", _finalOutput['cruise']['healthy'],
-                      _finalOutput['cruise']['totalSize']),
-
-                  // Idle Data
-                  _buildTableRow("Idle", _finalOutput['idle']['healthy'],
-                      _finalOutput['idle']['totalSize']),
-
-                  // Takeoff Data
-                  _buildTableRow("Takeoff", _finalOutput['takeoff']['healthy'],
-                      _finalOutput['takeoff']['totalSize']),
-                ],
-              ),
-            ),
-          ),
-
-          SizedBox(height: 20),
-
-          // Total Rows, Removed Rows, and Overall Status
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Table(
+              columnWidths: {
+                0: FlexColumnWidth(1),
+                1: FlexColumnWidth(1),
+                2: FlexColumnWidth(1),
+              },
+              border: TableBorder.all(color: Colors.black),
               children: [
-                // Total Rows
-                _buildStatusRow("Total Rows:", _finalOutput['totalRows']),
-
-                // Removed Rows
-                _buildStatusRow("Removed Rows:", _finalOutput['removedRows']),
-
-                // Overall Status
-                Row(
-                  children: [
-                    Text(
-                      "Overall Status: ",
+                // Table Header
+                TableRow(children: [
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Text(
+                      "Mode",
                       style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
+                          fontWeight: FontWeight.bold, color: Colors.black),
                     ),
-                    Text(
-                      _finalOutput['overallStatus'],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Text(
+                      "Healthy",
                       style: TextStyle(
-                        color: _finalOutput['overallStatus'] == 'Healthy'
-                            ? Colors.green
-                            : Colors.red,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                          fontWeight: FontWeight.bold, color: Colors.black),
                     ),
-                  ],
-                ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Text(
+                      "Total",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.black),
+                    ),
+                  ),
+                ]),
+
+                // Cruise Data
+                _buildTableRow("Cruise", _finalOutput['cruise']['healthy'],
+                    _finalOutput['cruise']['totalSize']),
+
+                // Idle Data
+                _buildTableRow("Idle", _finalOutput['idle']['healthy'],
+                    _finalOutput['idle']['totalSize']),
+
+                // Takeoff Data
+                _buildTableRow("Takeoff", _finalOutput['takeoff']['healthy'],
+                    _finalOutput['takeoff']['totalSize']),
               ],
             ),
           ),
-        ],
-      );
-    
+        ),
+
+        SizedBox(height: 20),
+
+        // Total Rows, Removed Rows, and Overall Status
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Total Rows
+              _buildStatusRow("Total Rows:", _finalOutput['totalRows']),
+
+              // Removed Rows
+              _buildStatusRow("Removed Rows:", _finalOutput['removedRows']),
+
+              // Overall Status
+              Row(
+                children: [
+                  Text(
+                    "Overall Status: ",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  Text(
+                    _finalOutput['overallStatus'],
+                    style: TextStyle(
+                      color: _finalOutput['overallStatus'] == 'Healthy'
+                          ? Colors.green
+                          : Colors.red,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   void _showUploadHistory() {
@@ -636,11 +646,47 @@ class _MyHomePageState extends State<MyHomePage>
           ),
         ],
       ),
+      // floatingActionButton: FloatingActionButton.extended(
+      //   onPressed: _toggle ? _generateResults : _pickFile,
+      //   label: Text(_toggle ? "Generate Results" : "Upload Excel"),
+      //   icon: _fileUploaded ? Icon(Icons.analytics) : Icon(Icons.upload_file),
+      //   backgroundColor: Colors.deepOrange,
+      // ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _fileUploaded ? _generateResults : _pickFile,
-        label: Text(_fileUploaded ? "Generate Results" : "Upload Excel"),
-        icon: _fileUploaded ? Icon(Icons.analytics) : Icon(Icons.upload_file),
-        backgroundColor: Colors.deepOrange,
+        onPressed: _loading
+            ? null // Disable the button when loading
+            : () async {
+                if (_toggle) {
+                  await _generateResults(); // Your generate logic
+                } else {
+                  await _pickFile(); // Your file picking logic
+                }
+              },
+        label: _loading
+            ? Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.0,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                  SizedBox(
+                      width: 8), // Add some spacing between the loader and text
+                  Text("Loading..."),
+                ],
+              )
+            : Text(_toggle ? "Generate Results" : "Upload Excel"),
+        icon: _loading
+            ? null
+            : _fileUploaded
+                ? Icon(Icons.analytics)
+                : Icon(Icons.upload_file),
+        backgroundColor: _loading
+            ? Colors.grey
+            : Colors.deepOrange, // Optional: Change color when loading
       ),
     );
   }
