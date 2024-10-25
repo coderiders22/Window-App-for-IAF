@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_app_ui/model.dart';
+import 'package:web_app_ui/utils.dart';
 import 'non_web_util.dart' if (dart.library.html) 'web_util.dart';
 
 void main() {
@@ -67,7 +68,7 @@ class _MyHomePageState extends State<MyHomePage>
   @override
   void initState() {
     super.initState();
-    // _loadHistory();
+    _loadHistory();
     _animationController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
@@ -82,21 +83,21 @@ class _MyHomePageState extends State<MyHomePage>
     super.dispose();
   }
 
-  // Future<void> _loadHistory() async {
-  //   final prefs = await SharedPreferences.getInstance();
-  //   setState(() {
-  //     _downloadHistory = prefs.getStringList('downloadHistory') ?? [];
-  //     _uploadHistory = prefs.getStringList('uploadHistory') ?? [];
-  //   });
-  // }
+  Future<void> _loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _downloadHistory = prefs.getStringList('downloadHistory') ?? [];
+      _uploadHistory = prefs.getStringList('uploadHistory') ?? [];
+    });
+  }
 
-  // Future<void> _saveHistory() async {
-  //   final prefs = await SharedPreferences.getInstance();
-  //   await prefs.setStringList('downloadHistory', _downloadHistory);
-  //   await prefs.setStringList('uploadHistory', _uploadHistory);
-  // }
+  Future<void> _saveHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('downloadHistory', _downloadHistory);
+    await prefs.setStringList('uploadHistory', _uploadHistory);
+  }
 
-  Future<void> _pickFile() async {
+  Future<void> _pickFile(BuildContext context) async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       withData: true,
       type: FileType.custom,
@@ -174,11 +175,17 @@ class _MyHomePageState extends State<MyHomePage>
 
         if (allStringsPresent) {
           List<int> selectedIndices = [];
+          int nlIndex = -1;
+          int npIndex = -1;
           if (_aircraftData.isNotEmpty) {
             List<dynamic> headerRow = _aircraftData[0];
             selectedIndices =
                 stringsToCheck.map((col) => headerRow.indexOf(col)).toList();
           }
+          // Find the indices for 'nl' and 'np'
+          // Find the indices for 'nl' and 'np'
+          nlIndex = stringsToCheck.indexOf('(13)nl');
+          npIndex = stringsToCheck.indexOf('(29)np');
 
           int removedCount = 0;
           List<List<dynamic>> filteredData = _aircraftData.where((row) {
@@ -196,6 +203,20 @@ class _MyHomePageState extends State<MyHomePage>
 
           for (var row in filteredData) {
             bool isValidRow = true;
+            // Check if values in 'nl' and 'np' columns meet the conditions
+            var nlValue =
+                double.tryParse(row[nlIndex].toString()) ?? double.nan;
+            var npValue =
+                double.tryParse(row[npIndex].toString()) ?? double.nan;
+
+            if (nlValue > 150 ||
+                nlValue < -0.5 ||
+                npValue > 150 ||
+                npValue < -0.5) {
+              isValidRow = false;
+              removedCount++;
+              continue; // Skip this row
+            }
             for (var value in row) {
               if (value == null ||
                   value.toString().trim().isEmpty ||
@@ -214,7 +235,7 @@ class _MyHomePageState extends State<MyHomePage>
           predictions["removedRows"] = removedCount;
           predictions["totalRows"] = validData.length - 1;
         } else {
-          throw ArgumentError("Wrong CSV Uploaded");
+          throw ErrorDescription("Wrong CSV Uploaded");
         }
         // Working in chroma and not windows need to work on that
 
@@ -226,17 +247,26 @@ class _MyHomePageState extends State<MyHomePage>
               .add('${DateTime.now().toIso8601String()}: $_excelFileName');
           _finalOutput = predictions;
         });
-        print(_finalOutput);
-        print(_fileUploaded);
+        showCustomPopup(context, true, 'CSV Parsed Successfully');
 
-        // _saveHistory();
+        _saveHistory();
       } catch (e) {
-        print("Error $e");
+        setState(() {
+          _fileUploaded = false;
+          _loading = false;
+          _toggle = false;
+          _excelData.clear();
+          _aircraftData.clear();
+          _showResults = false;
+          _excelFileName = null;
+        });
+        print("Error ${e.toString()}");
+        showCustomPopup(context, false, 'Incomplete CSV Uploaded');
       }
     }
   }
 
-  Future<void> _generateResults() async {
+  Future<void> _generateResults(BuildContext context) async {
     if (_finalOutput.isEmpty) return;
 
     setState(() {
@@ -250,7 +280,7 @@ class _MyHomePageState extends State<MyHomePage>
         _downloadHistory
             .add('${DateTime.now().toIso8601String()}: ${pdfFile.path}');
       });
-      // _saveHistory();
+      _saveHistory();
 
       _showPDFSavedNotification(pdfFile.path);
     }
@@ -262,6 +292,7 @@ class _MyHomePageState extends State<MyHomePage>
 
   void _showPDFSavedNotification(String filePath) {
     String message = kIsWeb ? "PDF Downloaded" : "PDF saved: $filePath";
+    showCustomPopup(context, true, message);
   }
 
   Future<File?> _generateStyledPDF() async {
@@ -356,6 +387,7 @@ class _MyHomePageState extends State<MyHomePage>
       return file.writeAsBytes(await pdf.save());
     } catch (e) {
       print("Error PDF ${e}");
+      showCustomPopup(context, false, e.toString());
       return null;
     }
   }
@@ -657,9 +689,9 @@ class _MyHomePageState extends State<MyHomePage>
             ? null // Disable the button when loading
             : () async {
                 if (_toggle) {
-                  await _generateResults(); // Your generate logic
+                  await _generateResults(context); // Your generate logic
                 } else {
-                  await _pickFile(); // Your file picking logic
+                  await _pickFile(context); // Your file picking logic
                 }
               },
         label: _loading
