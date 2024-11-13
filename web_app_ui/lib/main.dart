@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +10,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_app_ui/model.dart';
 import 'package:web_app_ui/utils.dart';
@@ -117,6 +120,58 @@ class _MyHomePageState extends State<MyHomePage>
 
       try {
         final excelBytes = result.files.single.bytes!;
+        final url = Uri.parse(
+            'http://localhost:5000/upload'); // Replace with your server URL
+        final request = http.MultipartRequest('POST', url)
+          ..files.add(
+            http.MultipartFile.fromBytes(
+              'file',
+              excelBytes,
+              filename: 'upload.xlsx', // Set a default filename
+            ),
+          );
+
+        final streamedResponse = await request.send();
+        final response = await http.Response.fromStream(streamedResponse);
+        final jsonResponse = jsonDecode(response.body);
+
+        if (response.statusCode == 200) {
+          final data = jsonResponse["data"];
+          final healthCruise = (data["health_percentages"]['cruise']) * 100;
+          final healthIdle = (data["health_percentages"]["idle"]) * 100;
+          final healthTakeoff = (data["health_percentages"]["takeoff"]) * 100;
+          final countCruise = data["mode counts"]["cruise"];
+          final countIdle = data["mode counts"]["idle"];
+          final countTakeoff = data["mode counts"]["takeoff"];
+          final health = data["health"];
+          double avgPercentage =
+              (healthCruise + healthIdle + healthTakeoff) / 3;
+          predictions = {
+            'cruise': {
+              'healthy': healthCruise,
+              'totalSize': countCruise,
+            },
+            'idle': {
+              'healthy': healthIdle,
+              'totalSize': countIdle,
+            },
+            'takeoff': {
+              'healthy': healthTakeoff,
+              'totalSize': countTakeoff,
+            },
+            'averagePercentage': avgPercentage,
+            'overallStatus': health
+          };
+          print(predictions);
+          final nullVal = data["null_rows_dropped"] + data["outliers_removed"];
+          predictions["removedRows"] = nullVal;
+          final totalRows = data["orig_rows"];
+          predictions["totalRows"] = totalRows;
+          print('File uploaded successfully');
+        } else {
+          throw ErrorDescription(jsonResponse["message"]);
+        }
+
         final excel = Excel.decodeBytes(excelBytes);
         final sheet = excel.tables[excel.tables.keys.first]!;
 
@@ -138,105 +193,6 @@ class _MyHomePageState extends State<MyHomePage>
             .whereType<List<dynamic>>()
             .toList();
 
-        List<String> stringsToCheck = [
-          '(2)ny',
-          '(3)kr',
-          '(4)tg',
-          '(6)hg',
-          '(7)ku',
-          '(8)xh',
-          '(9)sh',
-          '(11)dk',
-          '(12)db',
-          '(13)nl',
-          '(14)pb',
-          '(16)nz',
-          '(17)tgd2',
-          '(21)xk',
-          '(22)xosh',
-          '(23)tgd1',
-          '(24)xb',
-          '(29)np',
-          '(31)v',
-          '(32)h',
-          '(45)nb',
-          '(63)u'
-        ];
-
-        bool allStringsPresent = false;
-
-        if (_aircraftData.isNotEmpty) {
-          List<dynamic> firstArray = _aircraftData[0];
-
-          // Check if each string in 'stringsToCheck' exists in 'firstArray'.
-          allStringsPresent =
-              stringsToCheck.every((string) => firstArray.contains(string));
-        }
-
-        if (allStringsPresent) {
-          List<int> selectedIndices = [];
-          int nlIndex = -1;
-          int npIndex = -1;
-          if (_aircraftData.isNotEmpty) {
-            List<dynamic> headerRow = _aircraftData[0];
-            selectedIndices =
-                stringsToCheck.map((col) => headerRow.indexOf(col)).toList();
-          }
-          // Find the indices for 'nl' and 'np'
-          // Find the indices for 'nl' and 'np'
-          nlIndex = stringsToCheck.indexOf('(13)nl');
-          npIndex = stringsToCheck.indexOf('(29)np');
-
-          int removedCount = 0;
-          List<List<dynamic>> filteredData = _aircraftData.where((row) {
-            // Check if all selected indices are valid for the current row
-            if (!selectedIndices.every((index) => index < row.length)) {
-              removedCount++; // Increment count for removed row
-              return false; // Exclude this row
-            }
-            return true; // Include this row
-          }).map((row) {
-            // Map the valid rows to the selected indices
-            return selectedIndices.map((index) => row[index]).toList();
-          }).toList();
-          List<List<dynamic>> validData = [];
-
-          for (var row in filteredData) {
-            bool isValidRow = true;
-            // Check if values in 'nl' and 'np' columns meet the conditions
-            var nlValue =
-                double.tryParse(row[nlIndex].toString()) ?? double.nan;
-            var npValue =
-                double.tryParse(row[npIndex].toString()) ?? double.nan;
-
-            if (nlValue > 150 ||
-                nlValue < -0.5 ||
-                npValue > 150 ||
-                npValue < -0.5) {
-              isValidRow = false;
-              removedCount++;
-              continue; // Skip this row
-            }
-            for (var value in row) {
-              if (value == null ||
-                  value.toString().trim().isEmpty ||
-                  value.toString() == 'NaN') {
-                isValidRow = false;
-                removedCount++;
-                break;
-              }
-            }
-            if (isValidRow) {
-              validData.add(row);
-            }
-          }
-
-          predictions = await runRandomForestModel(validData);
-          predictions["removedRows"] = removedCount;
-          predictions["totalRows"] = validData.length - 1;
-        } else {
-          throw ErrorDescription("Wrong CSV Uploaded");
-        }
         // Working in chroma and not windows need to work on that
 
         setState(() {

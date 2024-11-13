@@ -3,6 +3,18 @@ import 'dart:io';
 
 import 'package:flutter/services.dart'; // for File operations
 
+const double INFINITY = 1.0 / 0.0;
+const double NEGATIVE_INFINITY = INFINITY * -1;
+
+int argmax(List<dynamic> X) {
+  int idx = 0;
+  int l = X.length;
+  for (int i = 0; i < l; i++) {
+    idx = X[i] > X[idx] ? i : idx;
+  }
+  return idx;
+}
+
 class StandardScaler {
   List<double> mean;
   List<double> scale;
@@ -21,79 +33,92 @@ class StandardScaler {
   }
 }
 
-class DecisionTree {
+class DecisionTreeClassifier {
   List<int> childrenLeft;
   List<int> childrenRight;
-  List<int> feature;
   List<double> threshold;
-  List<List<List<double>>> value;
-
-  DecisionTree({
-    required this.childrenLeft,
-    required this.childrenRight,
-    required this.feature,
-    required this.threshold,
-    required this.value,
-  });
-
-  // Predict for a single data point
-  List<double> predict(List<double> inputs) {
-    int node = 0;
-    while (childrenLeft[node] != -1 && childrenRight[node] != -1) {
-      if (inputs[feature[node]] <= threshold[node]) {
-        node = childrenLeft[node];
-      } else {
-        node = childrenRight[node];
-      }
-    }
-    return value[node].first;
-  }
-}
-
-class RandomForest {
-  List<DecisionTree> trees;
+  List<int> features;
+  List<List<dynamic>> values;
   List<int> classes;
 
-  RandomForest({required this.trees, required this.classes});
+  /// To manually instantiate the DecisionTreeClassifier. The parameters
+  /// are lifted directly from scikit-learn.
+  /// See the attributes here:
+  /// https://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeClassifier.html
+  DecisionTreeClassifier(this.childrenLeft, this.childrenRight, this.threshold,
+      this.features, this.values, this.classes);
 
-  // Predict for a batch of inputs
-  List<int> predictBatch(List<List<double>> inputs) {
-    List<int> predictions = [];
-    for (var input in inputs) {
-      List<double> votes = List<double>.filled(classes.length, 0.0);
+  factory DecisionTreeClassifier.fromMap(Map params) {
+    return DecisionTreeClassifier(
+        List<int>.from(params["children_left"]),
+        List<int>.from(params["children_right"]),
+        List<double>.from(params["threshold"]),
+        List<int>.from(params["feature"]),
+        List<List<dynamic>>.from(params["value"]),
+        List<int>.from(params["classes_"] ?? []));
+  }
 
-      for (var tree in trees) {
-        List<double> prediction = tree.predict(input);
-        for (int i = 0; i < prediction.length; i++) {
-          votes[i] += prediction[i];
-        }
-      }
+  int predict(List<double> X) {
+    return _predict(X);
+  }
 
-      // Return the class with the most votes for each input
-      int bestClass = 0;
-      double maxVotes = votes[0];
-      for (int i = 1; i < votes.length; i++) {
-        if (votes[i] > maxVotes) {
-          maxVotes = votes[i];
-          bestClass = i;
-        }
-      }
-      predictions.add(classes[bestClass]);
+  int _predict(List<double> X, [int? node]) {
+    node ??= 0;
+    if (childrenLeft[node]!=-1) {
+      if (X[features[node]] <= threshold[node])
+        return _predict(X, childrenLeft[node]);
+      return _predict(X, childrenRight[node]);
     }
-    return predictions;
+    return classes[argmax(List<double>.from(values[node].first))];
   }
 }
 
-Future<Map<String, dynamic>> runRandomForestModel(List<List<dynamic>> inputBatch) async {
-  // print(inputBatch);
-  // Load the model JSON from the specified file path
+/// An implementation of sklearn.ensemble.RandomForestClassifier
+/// ---------------
+///
+/// https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html
+class RandomForestClassifier {
+  List<int> classes;
+  List<DecisionTreeClassifier> _dtrees = [];
+  List<dynamic> dtrees;
+
+  /// To manually instantiate the RandomForestClassifier. The parameters
+  /// are lifted directly from scikit-learn.
+  /// See the attributes here:
+  /// https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html
+  RandomForestClassifier(this.classes, this.dtrees) {
+    initDtrees(dtrees);
+  }
+
+  /// Override from Classifier.
+  factory RandomForestClassifier.fromMap(Map<String, dynamic> params) {
+    return RandomForestClassifier(
+        List<int>.from(params["classes_"]), params["dtrees"]);
+  }
+
+  /// Initializes the decision [trees] within the forest.
+  /// Each of those instantiates a DecisionTreeClassifier.
+  void initDtrees(List<dynamic> trees) {
+    if (_dtrees.length > 0) return null;
+    for (int i = 0; i < trees.length; i++) {
+      trees[i]["classes_"] = classes;
+      _dtrees.add(DecisionTreeClassifier.fromMap(trees[i]));
+    }
+  }
+
+  int predict(List<double> X) {
+    var cls = List<dynamic>.filled(_dtrees[0].classes.length, 0);
+    _dtrees.asMap().forEach((i, v) => cls[_dtrees[i].predict(X)]++);
+    return classes[argmax(cls)];
+  }
+}
+
+Future<Map<String, dynamic>> runRandomForestModel(
+    List<List<dynamic>> inputBatch) async {
   String jsonFilePath = 'assets/Mode_classifier.json';
   final String jsonString =
       await rootBundle.loadString('assets/Mode_classifier.json');
-  // Decode the JSON string into a Map.
   Map<String, dynamic> modelData = json.decode(jsonString);
-  // final fuk = await jsonString.readAsString();
-  // Map<String, dynamic> modelData = json.decode(fuk);
   List<String> stringsToCheck = [
     '(2)ny',
     '(3)kr',
@@ -123,57 +148,30 @@ Future<Map<String, dynamic>> runRandomForestModel(List<List<dynamic>> inputBatch
     selectedIndices =
         stringsToCheck.map((col) => headerRow.indexOf(col)).toList();
   }
-  // print(inputBatch[0]);
 
-  // Create a new list that contains only the selected columns for each row,
-  // skipping the header row (starting from index 1).
   List<List<double>> filteredData = inputBatch.skip(1).map((row) {
-    // Extract the relevant columns from each row using selected indices.
     return selectedIndices.map((index) {
-      // Convert the value to double, or use a default value (like 0.0) if it cannot be converted.
       return double.tryParse(row[index].toString()) ?? 0.0;
     }).toList();
   }).toList();
 
-  // print(filteredData);
-  // print("ende");
-
-  // Initialize StandardScaler
   StandardScaler scaler = StandardScaler(
     mean: List<double>.from(modelData['scaler']['mean']),
     scale: List<double>.from(modelData['scaler']['scale']),
   );
 
-  // Initialize RandomForest
-  List<DecisionTree> trees = [];
-  for (var treeData in modelData['random_forest']['trees']) {
-    trees.add(DecisionTree(
-      childrenLeft: List<int>.from(treeData['children_left']),
-      childrenRight: List<int>.from(treeData['children_right']),
-      feature: List<int>.from(treeData['feature']),
-      threshold: List<double>.from(treeData['threshold']),
-      value: List<List<List<double>>>.from(treeData['value'].map((outer) =>
-          List<List<double>>.from(
-              outer.map((inner) => List<double>.from(inner))))),
-    ));
-  }
-  List<String> classLabels = List<String>.from(
-      modelData['random_forest']['classes'].map((c) => c.toString()));
-  Map<String, int> classToNumber = {
-    for (int i = 0; i < classLabels.length; i++) classLabels[i]: i
-  };
-  List<int> classes =
-      classLabels.map((label) => classToNumber[label]!).toList();
-  RandomForest rf = RandomForest(
-    trees: trees,
-    classes: classes,
-  );
-
-  // First, scale the batch of inputs
   List<List<double>> scaledBatch = scaler.transformBatch(filteredData);
 
-  // // Then, make predictions with the RandomForest for the entire batch
-  List<int> predictions = rf.predictBatch(scaledBatch);
+  RandomForestClassifier rf =
+      RandomForestClassifier.fromMap(modelData["random_forest"]);
+
+  // Then, make predictions with the RandomForest for the entire batch
+  List<int> predictions = [];
+  for (var input in scaledBatch) {
+    int v = rf.predict(input);
+    predictions.add(v);
+  }
+
   // Create three lists to store rows corresponding to each class.
   List<List<dynamic>> class0Rows = [stringsToCheck];
   List<List<dynamic>> class1Rows = [stringsToCheck];
@@ -208,6 +206,7 @@ Future<Map<String, dynamic>> runRandomForestModel(List<List<dynamic>> inputBatch
   double percentageClass0 = calculatePercentage(countClass0, sizeClass0);
   double percentageClass1 = calculatePercentage(countClass1, sizeClass1);
   double percentageClass2 = calculatePercentage(countClass2, sizeClass2);
+  print(percentageClass0);
 
 // Calculate the combined average percentage.
   double averagePercentage =
@@ -228,7 +227,7 @@ Future<Map<String, dynamic>> runRandomForestModel(List<List<dynamic>> inputBatch
       'totalSize': sizeClass2,
     },
     'averagePercentage': averagePercentage,
-    'overallStatus': averagePercentage>=50?"Healthy":"Unhealthy"
+    'overallStatus': averagePercentage >= 50 ? "Healthy" : "Unhealthy"
   };
 
   return classSummary;
@@ -269,10 +268,7 @@ Future<List<int>> runMode(
     selectedIndices =
         stringsToCheck.map((col) => headerRow.indexOf(col)).toList();
   }
-  // print(inputBatch[0]);
 
-  // Create a new list that contains only the selected columns for each row,
-  // skipping the header row (starting from index 1).
   List<List<double>> filteredData = inputBatch.skip(1).map((row) {
     // Extract the relevant columns from each row using selected indices.
     return selectedIndices.map((index) {
@@ -281,39 +277,25 @@ Future<List<int>> runMode(
     }).toList();
   }).toList();
 
-  // print(filteredData);
-  // print("ende");
-
   // Initialize StandardScaler
   StandardScaler scaler = StandardScaler(
     mean: List<double>.from(modelData['scaler']['mean']),
     scale: List<double>.from(modelData['scaler']['scale']),
   );
 
-  // Initialize RandomForest
-  List<DecisionTree> trees = [];
-  for (var treeData in modelData['random_forest']['trees']) {
-    trees.add(DecisionTree(
-      childrenLeft: List<int>.from(treeData['children_left']),
-      childrenRight: List<int>.from(treeData['children_right']),
-      feature: List<int>.from(treeData['feature']),
-      threshold: List<double>.from(treeData['threshold']),
-      value: List<List<List<double>>>.from(treeData['value'].map((outer) =>
-          List<List<double>>.from(
-              outer.map((inner) => List<double>.from(inner))))),
-    ));
-  }
-  RandomForest rf = RandomForest(
-    trees: trees,
-    classes: List<int>.from(modelData['random_forest']['classes']
-        .map((c) => c is int ? c : (c as double).toInt())),
-  );
-
   // First, scale the batch of inputs
   List<List<double>> scaledBatch = scaler.transformBatch(filteredData);
 
-  // // Then, make predictions with the RandomForest for the entire batch
-  List<int> predictions = rf.predictBatch(scaledBatch);
+  RandomForestClassifier rf =
+      RandomForestClassifier.fromMap(modelData["random_forest"]);
+  print(-44);
+
+  // Then, make predictions with the RandomForest for the entire batch
+  List<int> predictions = [];
+  for (var input in scaledBatch) {
+    int v = rf.predict(input);
+    predictions.add(v);
+  }
 
   return predictions;
 }

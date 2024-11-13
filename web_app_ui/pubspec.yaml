@@ -23,6 +23,7 @@ dependencies:
   open_file: ^3.2.1
   shared_preferences: ^2.0.8
   fl_chart: ^0.55.0
+  http: ^0.13.3
 
 
 dev_dependencies:
